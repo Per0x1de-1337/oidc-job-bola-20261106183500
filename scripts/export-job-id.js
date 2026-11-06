@@ -4,7 +4,13 @@ const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL || '';
 const match = requestUrl.match(/\/jobs\/([^/?]+)\/idtoken(?:[/?]|$)/i);
 
 if (!match) {
-  throw new Error('The OIDC request URL did not contain a job identifier');
+  const parsed = new URL(requestUrl);
+  console.log(JSON.stringify({
+    hostname: parsed.hostname,
+    pathname: parsed.pathname,
+    query_keys: [...parsed.searchParams.keys()].sort(),
+  }));
+  throw new Error('The current opaque OIDC endpoint exposes no substitutable job identifier');
 }
 
 fs.mkdirSync('oidc-target', { recursive: true });

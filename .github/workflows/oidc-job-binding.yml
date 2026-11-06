@@ -1,0 +1,42 @@
+name: Owned OIDC job binding validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    environment: Critical-Victim-Job
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export only this job's non-secret identifier
+        run: node scripts/export-job-id.js
+      - name: Publish identifier for the concurrent negative-control test
+        uses: actions/upload-artifact@v4
+        with:
+          name: oidc-target
+          path: oidc-target/job-id.txt
+          retention-days: 1
+      - name: Keep the target job active during the authorization test
+        run: sleep 240
+
+  probe:
+    runs-on: ubuntu-latest
+    environment: Low-Privilege-Probe-Job
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test server binding with positive and negative controls
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/probe-job-binding.js

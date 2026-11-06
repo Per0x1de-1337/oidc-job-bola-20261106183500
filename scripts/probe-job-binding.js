@@ -14,16 +14,20 @@ for (const [name, value] of Object.entries({ apiToken, oidcBearer, ownRequestUrl
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function jobIdFrom(url) {
-  const match = url.match(/\/jobs\/([^/?]+)\/idtoken(?:[/?]|$)/i);
-  if (!match) throw new Error('OIDC URL did not contain a job identifier');
-  return match[1];
+function endpointIdsFrom(url) {
+  const parsed = new URL(url);
+  const match = parsed.pathname.match(/\/idtoken\/([^/]+)\/([^/?]+)$/i);
+  if (!match) throw new Error('OIDC URL did not contain the current endpoint identifier pair');
+  return { first: match[1], second: match[2] };
 }
 
-function urlForJob(jobId) {
-  const ownJobId = jobIdFrom(ownRequestUrl);
-  const changed = ownRequestUrl.replace(`/jobs/${ownJobId}/idtoken`, `/jobs/${jobId}/idtoken`);
-  const url = new URL(changed);
+function urlForIds(ids) {
+  const own = endpointIdsFrom(ownRequestUrl);
+  const url = new URL(ownRequestUrl);
+  url.pathname = url.pathname.replace(
+    `/idtoken/${own.first}/${own.second}`,
+    `/idtoken/${ids.first}/${ids.second}`,
+  );
   url.searchParams.set('audience', 'urn:owned:oidc-job-binding-probe');
   return url.toString();
 }
@@ -42,8 +46,8 @@ function selectedClaims(jwt) {
   };
 }
 
-async function oidcProbe(label, jobId) {
-  const response = await fetch(urlForJob(jobId), {
+async function oidcProbe(label, ids) {
+  const response = await fetch(urlForIds(ids), {
     headers: { Authorization: `Bearer ${oidcBearer}` },
     redirect: 'manual',
   });
@@ -80,21 +84,32 @@ async function downloadTargetArtifact() {
   fs.writeFileSync('oidc-target.zip', Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
   fs.mkdirSync('downloaded-target', { recursive: true });
   execFileSync('unzip', ['-q', '-o', 'oidc-target.zip', '-d', 'downloaded-target']);
-  return fs.readFileSync('downloaded-target/job-id.txt', 'utf8').trim();
+  return JSON.parse(fs.readFileSync('downloaded-target/endpoint-identifiers.json', 'utf8'));
 }
 
 async function main() {
-  const ownJobId = jobIdFrom(ownRequestUrl);
-  const targetJobId = await downloadTargetArtifact();
-  if (!targetJobId || targetJobId === ownJobId) throw new Error('Target job identifier was invalid');
+  const ownIds = endpointIdsFrom(ownRequestUrl);
+  const targetIds = await downloadTargetArtifact();
+  if (!targetIds.first || !targetIds.second) throw new Error('Target endpoint identifiers were invalid');
 
-  const own = await oidcProbe('own-job-positive-control', ownJobId);
-  const random = await oidcProbe('random-job-negative-control', crypto.randomUUID());
-  const cross = await oidcProbe('other-concurrent-job-test', targetJobId);
+  const randomIds = { first: crypto.randomUUID(), second: crypto.randomUUID() };
+  const own = await oidcProbe('own-pair-positive-control', ownIds);
+  const random = await oidcProbe('random-pair-negative-control', randomIds);
+  const targetFirst = await oidcProbe('target-first-own-second', {
+    first: targetIds.first,
+    second: ownIds.second,
+  });
+  const targetSecond = await oidcProbe('own-first-target-second', {
+    first: ownIds.first,
+    second: targetIds.second,
+  });
+  const cross = await oidcProbe('target-pair-other-concurrent-job-test', targetIds);
 
   const summary = {
     own_control_succeeded: own.status === 200,
     random_control_rejected: random.status !== 200,
+    first_identifier_substitution_accepted: targetFirst.status === 200,
+    second_identifier_substitution_accepted: targetSecond.status === 200,
     cross_job_accepted: cross.status === 200,
     cross_job_environment: cross.claims?.environment,
   };

@@ -22,7 +22,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: oidc-target
-          path: oidc-target/job-id.txt
+          path: oidc-target/endpoint-identifiers.json
           retention-days: 1
       - name: Keep the target job active during the authorization test
         run: sleep 240
